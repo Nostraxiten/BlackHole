@@ -710,7 +710,7 @@ impl Probe for FfufProbe {
                             "directory".into(),
                             format!("status-{}", res.status),
                         ])
-                        .with_metadata("status".into(), res.status.to_string()),
+                        .with_metadata("status", res.status.to_string()),
                     );
                 }
             } else {
@@ -989,15 +989,15 @@ impl Probe for NiktoProbe {
                 .with_tags(vec!["nikto".into(), "vulnerability".into()]);
 
                 if let Some(id) = &vuln.id {
-                    finding = finding.with_metadata("nikto_id".into(), id.clone());
+                    finding = finding.with_metadata("nikto_id", id.clone());
                 }
                 if let Some(osvdb_val) = &vuln.osvdb {
                     if osvdb_val != "0" {
-                        finding = finding.with_metadata("osvdb".into(), osvdb_val.clone());
+                        finding = finding.with_metadata("osvdb", osvdb_val.clone());
                     }
                 }
                 if let Some(refs) = &vuln.references {
-                    finding = finding.with_metadata("references".into(), refs.clone());
+                    finding = finding.with_metadata("references", refs.clone());
                 }
 
                 findings.push(finding);

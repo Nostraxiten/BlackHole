@@ -11,7 +11,6 @@ path = "src/main.rs"
 tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 anyhow = "1"
-thiserror = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 quick-xml = { version = "0.36", features = ["serialize"] }
@@ -21,9 +20,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 ipnet = "2"
-regex = "1"
-futures = "0.3"
-tokio-stream = "0.1"
 async-trait = "0.1"
 tempfile = "3"
 reqwest = { version = "0.12", features = ["json", "gzip", "stream"], default-features = false }

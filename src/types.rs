@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use uuid::Uuid;
-use std::net::IpAddr;
+
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditMode {
@@ -50,6 +50,8 @@ pub enum FindingKind {
     ZoneTransfer,
     WebTechnology,
     MisconfiguredHeader,
+    HostDiscovery,
+    InformationDisclosure,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -17,7 +17,7 @@ mod deps;
 pub mod cve;
 
 use types::{AuditContext, AuditMode, Finding, Severity};
-use probe::{Probe, ProbeResult, ProbeStatus};
+use probe::{Probe, ProbeResult};
 use output::evidence_store::EvidenceStore;
 use output::report::ReportGenerator;
 

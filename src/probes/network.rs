@@ -4,7 +4,7 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use std::io::Cursor;
 use tempfile::NamedTempFile;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::executor::{check_tool_available, run_command};
 use crate::probe::{Probe, ProbeResult};

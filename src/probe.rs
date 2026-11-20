@@ -46,7 +46,7 @@ impl ProbeResult {
             probe_name: probe_name.into(),
             status: ProbeStatus::Success,
             findings,
-            new_ports: Vec::new>,
+            new_ports: Vec::new(),
             new_port_infos: Vec::new(),
             new_subdomains: Vec::new(),
             new_resolved_ips: Vec::new(),
