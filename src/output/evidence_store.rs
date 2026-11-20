@@ -118,6 +118,7 @@ impl EvidenceStore {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> &Path {
         &self.path
     }

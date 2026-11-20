@@ -192,6 +192,7 @@ async fn main() -> Result<()> {
         if c.mode == AuditMode::Target {
             stage2_probes.push(Arc::new(probes::dnsx::DnsxProbe::new(c.target.clone())));
             stage2_probes.push(Arc::new(probes::recon::DigProbe::new(c.target.clone())));
+            stage2_probes.push(Arc::new(probes::recon::FierceProbe::new(c.target.clone())));
         }
     }
     if !stage2_probes.is_empty() {

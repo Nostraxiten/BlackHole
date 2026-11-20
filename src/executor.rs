@@ -13,6 +13,7 @@ pub struct CommandOutput {
 }
 
 impl CommandOutput {
+    #[allow(dead_code)]
     pub fn is_success(&self) -> bool {
         self.exit_code == 0
     }
@@ -125,6 +126,7 @@ pub fn check_tool_available(tool: &str) -> bool {
 }
 
 /// Asynchronous version of tool availability check.
+#[allow(dead_code)]
 pub async fn check_tool_available_async(tool: &str) -> bool {
     let resolved = resolve_binary_path(tool);
     if Path::new(&resolved).is_file() {

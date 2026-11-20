@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use crate::types::{AuditContext, DnsRecord, Finding, PortInfo, TlsInfo};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ProbeStatus {
     Success,
     Skipped(String),

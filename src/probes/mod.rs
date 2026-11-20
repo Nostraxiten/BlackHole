@@ -9,6 +9,7 @@ pub mod dnsx;
 use crate::probe::Probe;
 use crate::types::{AuditContext, AuditMode};
 
+#[allow(dead_code)]
 pub fn build_pipeline(ctx: &AuditContext) -> Vec<Box<dyn Probe>> {
     let mut probes: Vec<Box<dyn Probe>> = Vec::new();
 

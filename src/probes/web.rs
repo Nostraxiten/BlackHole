@@ -169,7 +169,11 @@ impl Probe for CurlHeadersProbe {
             return Ok(ProbeResult::skipped("curl-headers", "curl binary not found"));
         }
 
-        let url = ctx.get_url();
+        let url = if !self.target.is_empty() && (self.target.starts_with("http://") || self.target.starts_with("https://")) {
+            self.target.clone()
+        } else {
+            ctx.get_url()
+        };
         info!("[*] Running CurlHeadersProbe against {}", url);
 
         let random_ua = get_random_user_agent();
@@ -417,7 +421,11 @@ impl Probe for HttpxProbe {
             return Ok(ProbeResult::skipped("httpx", "httpx binary not found"));
         }
 
-        let url = ctx.get_url();
+        let url = if !self.target.is_empty() && (self.target.starts_with("http://") || self.target.starts_with("https://")) {
+            self.target.clone()
+        } else {
+            ctx.get_url()
+        };
         info!("[*] Running HttpxProbe against target {}", url);
 
         let _sub_file_guard;
@@ -614,7 +622,11 @@ impl Probe for FfufProbe {
             }
         }
 
-        let base_url = ctx.get_url().trim_end_matches('/').to_string();
+        let base_url = if !self.target.is_empty() && (self.target.starts_with("http://") || self.target.starts_with("https://")) {
+            self.target.trim_end_matches('/').to_string()
+        } else {
+            ctx.get_url().trim_end_matches('/').to_string()
+        };
         let fuzz_url = format!("{}/FUZZ", base_url);
         info!("[*] Running FfufProbe against {}", fuzz_url);
 
@@ -828,13 +840,14 @@ impl NiktoProbe {
 }
 
 #[derive(Debug, Deserialize)]
-struct NiktoReport {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NiktoReport {
     #[serde(default)]
-    vulnerabilities: Vec<NiktoVulnerability>,
+    pub vulnerabilities: Vec<NiktoVulnerability>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct NiktoVulnerability {
+pub struct NiktoVulnerability {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(rename = "OSVDB", default)]
@@ -909,7 +922,11 @@ impl Probe for NiktoProbe {
             return Ok(ProbeResult::skipped("nikto", "nikto binary not found"));
         }
 
-        let url = ctx.get_url();
+        let url = if !self.target.is_empty() && (self.target.starts_with("http://") || self.target.starts_with("https://")) {
+            self.target.clone()
+        } else {
+            ctx.get_url()
+        };
         info!("[*] Running NiktoProbe against {}", url);
 
         let temp_out = NamedTempFile::new()?;

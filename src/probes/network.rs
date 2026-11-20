@@ -329,7 +329,12 @@ impl Probe for ArpScanProbe {
             return Ok(ProbeResult::skipped("arp-scan", "arp-scan binary not found"));
         }
 
-        let output = run_command("arp-scan", &["--localnet", "--ignoredups"], self.timeout_secs()).await?;
+        let args: Vec<&str> = if self.target.contains('/') {
+            vec![self.target.as_str(), "--ignoredups"]
+        } else {
+            vec!["--localnet", "--ignoredups"]
+        };
+        let output = run_command("arp-scan", &args, self.timeout_secs()).await?;
 
         let mut findings = Vec::new();
         let mut discovered_ips = Vec::new();

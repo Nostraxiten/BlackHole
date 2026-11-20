@@ -24,7 +24,7 @@ impl MasscanProbe {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct MasscanRecord {
+pub struct MasscanRecord {
     pub ip: Option<String>,
     pub timestamp: Option<String>,
     #[serde(default)]
@@ -32,7 +32,7 @@ struct MasscanRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct MasscanPortEntry {
+pub struct MasscanPortEntry {
     pub port: u16,
     #[serde(default = "default_proto")]
     pub proto: String,

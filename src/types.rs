@@ -185,6 +185,7 @@ pub struct TlsVuln {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct AuditContext {
     pub mode: AuditMode,
     pub target: String,
@@ -240,10 +241,12 @@ impl AuditContext {
         }
     }
 
+    #[allow(dead_code)]
     pub fn add_finding(&mut self, finding: Finding) {
         self.findings.push(finding);
     }
 
+    #[allow(dead_code)]
     pub fn add_findings(&mut self, findings: Vec<Finding>) {
         self.findings.extend(findings);
     }
