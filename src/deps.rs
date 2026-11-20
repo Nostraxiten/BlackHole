@@ -39,7 +39,7 @@ pub fn check_and_install_dependencies() {
     println!("{}", "[*] Verifying system binary dependencies...".cyan());
 
     for &tool in REQUIRED_TOOLS {
-        if check_tool_available(tool) {
+        if check_tool_available(tool) || (tool == "testssl.sh" && check_tool_available("testssl")) {
             info!("[+] Dependency verified: {}", tool);
             continue;
         }

@@ -86,11 +86,16 @@ impl Probe for DnsxProbe {
             "-aaaa",
             "-cname",
             "-resp",
+            "-t",
+            "150",
+            "-r",
+            "1.1.1.1,8.8.8.8,9.9.9.9",
             "-o",
             &tmp_out_path,
         ];
 
-        let _ = run_command("dnsx", &args, self.timeout_secs()).await?;
+        let dynamic_timeout = std::cmp::max(self.timeout_secs(), (hosts_to_resolve.len() as u64) / 100 + 60);
+        let _ = run_command("dnsx", &args, dynamic_timeout).await?;
 
         let content = match fs::read_to_string(&tmp_out_path) {
             Ok(c) => {

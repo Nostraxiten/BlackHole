@@ -847,10 +847,36 @@ impl Probe for WafDetectProbe {
             return Ok(ProbeResult::skipped("wafw00f", "empty output received"));
         }
 
-        let entries = Self::parse_wafw00f_json(&combined_output);
+        let mut entries = Self::parse_wafw00f_json(&combined_output);
         if entries.is_empty() {
-            warn!("[-] Could not parse any WAF entries from wafw00f output");
-            return Ok(ProbeResult::skipped("wafw00f", "Failed to parse json"));
+            let lower = combined_output.to_lowercase();
+            if lower.contains("is behind") {
+                let name = if lower.contains("cloudflare") {
+                    Some("Cloudflare".to_string())
+                } else if lower.contains("akamai") {
+                    Some("Akamai".to_string())
+                } else if lower.contains("aws") || lower.contains("cloudfront") {
+                    Some("AWS CloudFront / WAF".to_string())
+                } else {
+                    Some("Generic WAF".to_string())
+                };
+                entries.push(WafEntry {
+                    url: target_url.clone(),
+                    detected: true,
+                    firewall: name,
+                    manufacturer: None,
+                });
+            } else if lower.contains("no waf detected") || lower.contains("not behind") || lower.contains("none") {
+                entries.push(WafEntry {
+                    url: target_url.clone(),
+                    detected: false,
+                    firewall: None,
+                    manufacturer: None,
+                });
+            } else {
+                warn!("[-] Could not parse any WAF entries from wafw00f output");
+                return Ok(ProbeResult::skipped("wafw00f", "Failed to parse json"));
+            }
         }
 
         let mut findings: Vec<Finding> = Vec::new();
