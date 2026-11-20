@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use tracing::info;
@@ -56,8 +55,8 @@ impl ReportGenerator {
         ports.sort_by_key(|p| p.0);
         ports.dedup_by_key(|p| p.0);
 
-        // ---- CVEs ----
-        let cve_findings: Vec<&Finding> = findings.iter()
+        // ---- CVEs (used in vuln_findings filter below) ----
+        let _cve_findings: Vec<&Finding> = findings.iter()
             .filter(|f| f.raw_data.get("cve_id").is_some()
                      || f.raw_data.get("cve").is_some()
                      || matches!(f.kind, FindingKind::CveMatch | FindingKind::Vulnerability)
