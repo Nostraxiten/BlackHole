@@ -839,7 +839,6 @@ impl NiktoProbe {
     }
 }
 
-#[derive(Debug, Deserialize)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NiktoReport {
     #[serde(default)]
