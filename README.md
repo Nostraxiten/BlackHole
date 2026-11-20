@@ -310,7 +310,7 @@ Under DAG Stage 6, BlackHole runs an offline, in-memory correlation engine that 
                                   |
                                   v
                     +---------------------------+
-                    | Calibrated Confidence Match|
+                    |Calibrated Confidence Match|
                     | Exact Version:     0.95   |
                     | Vendor/Product:    0.70   |
                     | Fuzzy String:      0.50   |
