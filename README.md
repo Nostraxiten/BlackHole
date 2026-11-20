@@ -352,14 +352,6 @@ All generated assessment artifacts are persisted in the output directory:
 
 ---
 
-## ▍What "Zero Emojis & English Only" Means
-
-BlackHole strictly complies with enterprise security reporting standards:
-- **No Emojis**: All terminal output, logs, CLI strings, and generated reports use text-based log tags: `[*]`, `[+]`, `[-]`, `[!]`, `[CRITICAL]`, `[HIGH]`, `[MEDIUM]`, `[LOW]`, `[INFO]`.
-- **Pure English**: Every module, comment, variable, log message, error notice, and report is written strictly in technical English.
-
----
-
 > [!CAUTION]
 > **Authorized Testing Only.** BlackHole is an aggressive offensive security orchestrator designed exclusively for authorized penetration tests, vulnerability assessments, and defensive infrastructure audits. Conducting scans against targets without prior explicit written permission is unlawful.
 
