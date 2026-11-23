@@ -67,6 +67,18 @@ struct Cli {
     #[arg(short, long, default_value_t = 8)]
     concurrency: usize,
 
+    /// Stealth mode: downshift execution to avoid firewall detection, rate-limiting, and packet drops
+    #[arg(long)]
+    stealth: bool,
+
+    /// Active evasion: enables decoy IP rotation, packet fragmentation, and source port manipulation
+    #[arg(long)]
+    evade: bool,
+
+    /// Limit port scanning to top N ports (e.g. 100 or 1000) to minimize firewall timeout delays
+    #[arg(long)]
+    top_ports: Option<usize>,
+
     /// Enable verbose debug logging output
     #[arg(short, long)]
     verbose: bool,
@@ -139,6 +151,19 @@ async fn main() -> Result<()> {
     };
 
     let mut ctx = AuditContext::new(mode, &resolved_target, &cli.output);
+    ctx.stealth_mode = cli.stealth;
+    ctx.evasion_mode = cli.evade;
+    ctx.top_ports_limit = cli.top_ports;
+
+    if cli.stealth {
+        info!("[*] Stealth mode active: enforcing slow, firewall-evasive timing (-T2, 300ms delay jitter, low threads)");
+    }
+    if cli.evade {
+        info!("[*] Evasion mode active: enabling packet fragmentation (-f), decoy IPs (-D RND:3), and source port 53");
+    }
+    if let Some(top_p) = cli.top_ports {
+        info!("[*] Port scan restricted to top {} ports to prevent firewall timeout delays", top_p);
+    }
     if let Some(ref wl) = cli.wordlist {
         ctx.wordlist_path = Some(wl.clone());
     }
@@ -270,10 +295,18 @@ async fn main() -> Result<()> {
     let reporter = ReportGenerator::new(&cli.output, &session_id);
     reporter.generate(&all_findings, &resolved_target, Some(audit_mode_str))?;
 
-    info!("============================================================");
-    info!("[+] Assessment completed successfully.");
-    info!("[*] Total findings identified: {}", all_findings.len());
-    info!("[*] Artifacts location: {}", cli.output);
+    let html_path = format!("{}/report_{}.html", cli.output, session_id);
+    let md_path = format!("{}/report_{}.md", cli.output, session_id);
+    let json_path = format!("{}/summary_{}.json", cli.output, session_id);
+
+    println!("\n{}", "============================================================".cyan());
+    println!("{}", "   [+] BLACKHOLE SECURITY ASSESSMENT COMPLETED".green().bold());
+    println!("{}", "============================================================".cyan());
+    println!("  Target Asset:        {}", resolved_target.bold());
+    println!("  Audit Mode:          {}", audit_mode_str);
+    println!("  Session ID:          {}", session_id.yellow());
+    println!("  Total Findings:      {}", all_findings.len().to_string().bold());
+    println!("{}", "------------------------------------------------------------".cyan());
 
     let critical = all_findings.iter().filter(|f| f.severity == Severity::Critical).count();
     let high = all_findings.iter().filter(|f| f.severity == Severity::High).count();
@@ -281,17 +314,20 @@ async fn main() -> Result<()> {
     let low = all_findings.iter().filter(|f| f.severity == Severity::Low).count();
     let info_count = all_findings.iter().filter(|f| f.severity == Severity::Info).count();
 
-    if critical > 0 {
-        error!("[CRITICAL] Identifiers discovered: {}", critical);
-    }
-    if high > 0 {
-        warn!("[HIGH] Identifiers discovered: {}", high);
-    }
-    info!(
-        "[*] Metrics: Critical: {} | High: {} | Medium: {} | Low: {} | Info: {}",
-        critical, high, medium, low, info_count
+    println!(
+        "  Risk Metrics:        {} {} | {} {} | {} {} | {} {} | {} {}",
+        critical.to_string().red().bold(), "CRITICAL".red(),
+        high.to_string().bright_red().bold(), "HIGH".bright_red(),
+        medium.to_string().yellow().bold(), "MEDIUM".yellow(),
+        low.to_string().blue().bold(), "LOW".blue(),
+        info_count.to_string().green(), "INFO".green(),
     );
-    info!("============================================================");
+
+    println!("{}", "------------------------------------------------------------".cyan());
+    println!("  [+] Interactive HTML Dashboard:  {}", html_path.green());
+    println!("  [+] Technical Markdown Report:   {}", md_path.green());
+    println!("  [+] Machine JSON Summary:        {}", json_path.green());
+    println!("{}\n", "============================================================".cyan());
 
     Ok(())
 }

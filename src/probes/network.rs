@@ -76,12 +76,19 @@ fn handle_service_element(e: &BytesStart, current_port: &mut Option<PortInfo>) {
 }
 
 pub fn parse_nmap_xml(xml: &str) -> Result<Vec<PortInfo>> {
-    let trimmed = xml.trim();
+    let clean = crate::executor::strip_ansi_codes(xml);
+    let trimmed = clean.trim();
     if trimmed.is_empty() {
-        return Err(anyhow!("Nmap XML output is empty"));
+        return Ok(Vec::new());
     }
 
-    let mut reader = Reader::from_reader(Cursor::new(trimmed.as_bytes()));
+    // Find the first '<' to skip any banner/warning output printed before XML
+    let xml_payload = match trimmed.find('<') {
+        Some(idx) => &trimmed[idx..],
+        None => return Ok(Vec::new()),
+    };
+
+    let mut reader = Reader::from_reader(Cursor::new(xml_payload.as_bytes()));
     let mut buf = Vec::new();
 
     let mut found_nmaprun = false;
@@ -220,6 +227,10 @@ pub fn parse_nmap_xml(xml: &str) -> Result<Vec<PortInfo>> {
             }
             Ok(Event::Eof) => break,
             Err(e) => {
+                if !ports.is_empty() {
+                    warn!("Nmap XML ended prematurely ({}), returning {} discovered ports", e, ports.len());
+                    return Ok(ports);
+                }
                 return Err(anyhow!("Failed to parse Nmap XML: {}", e));
             }
             _ => {}
@@ -227,7 +238,7 @@ pub fn parse_nmap_xml(xml: &str) -> Result<Vec<PortInfo>> {
         buf.clear();
     }
 
-    if !found_nmaprun {
+    if !found_nmaprun && ports.is_empty() {
         return Err(anyhow!("Invalid Nmap XML: missing <nmaprun> root tag"));
     }
 
@@ -422,42 +433,74 @@ impl Probe for NmapDiscoveryProbe {
         300
     }
 
-    async fn run(&self, _ctx: &AuditContext) -> Result<ProbeResult> {
+    async fn run(&self, ctx: &AuditContext) -> Result<ProbeResult> {
         if !check_tool_available("nmap") {
             warn!("[-] nmap is not installed or available in PATH");
             return Ok(ProbeResult::skipped("nmap-discovery", "nmap binary not found"));
         }
 
         let target_clean = host_without_port(&self.target);
-        let args = [
-            "-sS",
-            "-Pn",
-            "-n",
-            "--top-ports",
-            "1000",
-            "--open",
-            "-T4",
-            "--max-retries",
-            "1",
-            "-oX",
-            "-",
-            target_clean,
+        let top_ports = ctx.top_ports_limit.unwrap_or(1000).to_string();
+
+        let mut args: Vec<String> = vec![
+            "-sS".to_string(),
+            "-Pn".to_string(),
+            "-n".to_string(),
+            "--top-ports".to_string(),
+            top_ports.clone(),
+            "--open".to_string(),
         ];
 
-        let output = match run_command("nmap", &args, self.timeout_secs()).await {
+        // Adaptive Timing: downshift to T2 + jitter if stealth mode or WAF detected
+        if ctx.stealth_mode || ctx.waf_detected {
+            info!("[*] Firewall/Stealth mode active: applying polite timing (-T2, 300ms scan-delay)");
+            args.push("-T2".to_string());
+            args.push("--scan-delay".to_string());
+            args.push("300ms".to_string());
+            args.push("--max-scan-delay".to_string());
+            args.push("1000ms".to_string());
+        } else {
+            args.push("-T4".to_string());
+        }
+
+        // Active Firewall Evasion: source port 53 (DNS) spoofing, packet fragmentation, decoys
+        if ctx.evasion_mode {
+            info!("[*] Active evasion enabled: packet fragmentation (-f), source-port 53, random decoys");
+            args.push("-f".to_string());
+            args.push("--source-port".to_string());
+            args.push("53".to_string());
+            args.push("-D".to_string());
+            args.push("RND:3".to_string());
+        }
+
+        args.push("--max-retries".to_string());
+        args.push("1".to_string());
+        args.push("--host-timeout".to_string());
+        args.push("5m".to_string());
+        args.push("-oX".to_string());
+        args.push("-".to_string());
+        args.push(target_clean.to_string());
+
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let output = match run_command("nmap", &arg_refs, self.timeout_secs()).await {
             Ok(out) => out,
             Err(e) => {
-                debug!("[-] Raw TCP SYN sweep failed (permission issue?), falling back to TCP Connect: {}", e);
+                warn!("[-] Primary TCP SYN sweep failed or timed out: {}. Initiating Firewall-Adaptive Fallback (-sT, T2, top 100 ports)...", e);
                 let fallback_args = [
                     "-sT",
                     "-Pn",
                     "-n",
                     "--top-ports",
-                    "1000",
+                    "100",
                     "--open",
-                    "-T4",
+                    "-T2",
+                    "--scan-delay",
+                    "250ms",
                     "--max-retries",
                     "1",
+                    "--host-timeout",
+                    "3m",
                     "-oX",
                     "-",
                     target_clean,
@@ -601,27 +644,44 @@ impl Probe for NmapServicesProbe {
         let ports_csv = ctx.ports_as_csv();
         let target_host = host_without_port(&self.target);
 
-        // Aggressive Service & Version scan with default scripts and NSE Vulners
-        let args = [
-            "-Pn",
-            "-sV",
-            "-sC",
-            "--version-all",
-            "--script",
-            "vulners",
-            "-p",
-            &ports_csv,
-            "-oX",
-            "-",
-            target_host,
+        let mut args: Vec<String> = vec![
+            "-Pn".to_string(),
+            "-sV".to_string(),
+            "-sC".to_string(),
+            "--version-all".to_string(),
+            "--script".to_string(),
+            "vulners".to_string(),
         ];
+
+        if ctx.stealth_mode || ctx.waf_detected {
+            info!("[*] Nmap services: throttling to -T2 with 250ms delay for firewall evasion");
+            args.push("-T2".to_string());
+            args.push("--scan-delay".to_string());
+            args.push("250ms".to_string());
+        } else {
+            args.push("-T4".to_string());
+        }
+
+        if ctx.evasion_mode {
+            args.push("--source-port".to_string());
+            args.push("53".to_string());
+        }
+
+        args.push("--host-timeout".to_string());
+        args.push("10m".to_string());
+        args.push("-p".to_string());
+        args.push(ports_csv.clone());
+        args.push("-oX".to_string());
+        args.push("-".to_string());
+        args.push(target_host.to_string());
 
         info!(
             "[*] Executing deep Nmap service & NSE vulners scan against {} on ports [{}]...",
             target_host, ports_csv
         );
 
-        let output = run_command("nmap", &args, self.timeout_secs()).await?;
+        let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let output = run_command("nmap", &arg_refs, self.timeout_secs()).await?;
         if output.stdout.trim().is_empty() {
             return Err(anyhow!("Nmap services scan produced empty XML output"));
         }

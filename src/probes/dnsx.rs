@@ -114,7 +114,8 @@ impl Probe for DnsxProbe {
         let mut dns_records: Vec<DnsRecord> = Vec::new();
         let mut resolved_count = 0usize;
 
-        for line in content.lines() {
+        let clean_content = crate::executor::strip_ansi_codes(&content);
+        for line in clean_content.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;

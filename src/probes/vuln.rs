@@ -64,7 +64,8 @@ impl Probe for NucleiProbe {
 
         let mut findings = Vec::new();
 
-        for line in output.stdout.lines() {
+        let clean_stdout = crate::executor::strip_ansi_codes(&output.stdout);
+        for line in clean_stdout.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
@@ -552,7 +553,8 @@ impl Probe for NetExecProbe {
         let mut findings = Vec::new();
         let mut in_shares_table = false;
 
-        for line in output.stdout.lines() {
+        let clean_stdout = crate::executor::strip_ansi_codes(&output.stdout);
+        for line in clean_stdout.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;

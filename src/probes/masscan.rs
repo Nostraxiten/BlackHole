@@ -66,11 +66,18 @@ impl Probe for MasscanProbe {
             return Ok(ProbeResult::skipped("masscan", "binary not found in PATH"));
         }
 
-        // Adaptive rate: 10000 pkts/s for external targets, 1000 pkts/s for local/LAN to prevent flooding
-        let rate = if ctx.is_local() { 1000 } else { 10000 };
+        // Adaptive rate: downshift if stealth mode / WAF detected to prevent firewall drop/lockout
+        let rate = if ctx.stealth_mode || ctx.waf_detected {
+            info!("[*] Masscan: applying stealth rate (250 pkts/sec, 4s wait) to evade firewall blocks");
+            250
+        } else if ctx.is_local() {
+            1000
+        } else {
+            10000
+        };
 
         info!(
-            "[*] Launching Masscan ultra-fast port scan against '{}' (rate: {} pkts/sec, ports: {})",
+            "[*] Launching Masscan port scan against '{}' (rate: {} pkts/sec, ports: {})",
             self.target, rate, self.ports
         );
 
@@ -79,14 +86,22 @@ impl Probe for MasscanProbe {
 
         let rate_str = rate.to_string();
         let port_spec = format!("-p{}", self.ports);
-        let args = [
-            &port_spec,
+        let mut args = vec![
+            port_spec.as_str(),
             "--rate",
             &rate_str,
             "-oJ",
             &tmp_path,
-            &self.target,
         ];
+
+        if ctx.stealth_mode || ctx.waf_detected {
+            args.push("--wait");
+            args.push("4");
+            args.push("--retries");
+            args.push("2");
+        }
+
+        args.push(&self.target);
 
         let cmd_out = run_command("masscan", &args, self.timeout_secs()).await?;
         if cmd_out.exit_code != 0 && !cmd_out.stderr.is_empty() {
@@ -222,27 +237,55 @@ impl Probe for MasscanProbe {
 }
 
 pub fn parse_masscan_json(content: &str) -> Vec<MasscanRecord> {
-    let trimmed = content.trim();
+    let clean = crate::executor::strip_ansi_codes(content);
+    let trimmed = clean.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
 
-    if trimmed.starts_with('[') && trimmed.ends_with(']') {
-        if let Ok(records) = serde_json::from_str::<Vec<MasscanRecord>>(trimmed) {
+    // Direct JSON array parsing
+    if let Ok(records) = serde_json::from_str::<Vec<MasscanRecord>>(trimmed) {
+        return records;
+    }
+
+    // Repair unclosed array if masscan was terminated early or timed out
+    if trimmed.starts_with('[') && !trimmed.ends_with(']') {
+        let mut repaired = trimmed.trim_end_matches(',').trim().to_string();
+        repaired.push(']');
+        if let Ok(records) = serde_json::from_str::<Vec<MasscanRecord>>(&repaired) {
             return records;
         }
     }
 
-    let sanitized = trimmed
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .trim();
-
+    // Robust object-level scanner: parses independent JSON objects while ignoring comments
     let mut records = Vec::new();
-    for block in sanitized.split("},") {
-        let mut json_str = block.trim().to_string();
-        if !json_str.ends_with('}') {
-            json_str.push('}');
+    let mut in_obj = false;
+    let mut current_obj = String::new();
+    let mut depth = 0;
+
+    for line in trimmed.lines() {
+        let l = line.trim();
+        if l.starts_with('#') || l.is_empty() {
+            continue;
         }
-        if let Ok(record) = serde_json::from_str::<MasscanRecord>(&json_str) {
-            records.push(record);
+        for c in l.chars() {
+            if c == '{' {
+                depth += 1;
+                in_obj = true;
+            }
+            if in_obj {
+                current_obj.push(c);
+            }
+            if c == '}' {
+                depth -= 1;
+                if depth == 0 && in_obj {
+                    if let Ok(rec) = serde_json::from_str::<MasscanRecord>(&current_obj) {
+                        records.push(rec);
+                    }
+                    current_obj.clear();
+                    in_obj = false;
+                }
+            }
         }
     }
 

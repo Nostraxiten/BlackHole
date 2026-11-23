@@ -132,17 +132,68 @@ impl CurlHeadersProbe {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct HttpParsedResponse {
+    pub status_code: Option<u16>,
+    pub http_version: Option<String>,
+    pub status_text: Option<String>,
+    pub headers: HashMap<String, String>,
+    pub cookies: Vec<String>,
+}
+
 pub fn parse_headers(raw: &str) -> HashMap<String, String> {
-    let mut headers = HashMap::new();
-    for line in raw.lines() {
+    parse_http_response(raw).headers
+}
+
+pub fn parse_http_response(raw: &str) -> HttpParsedResponse {
+    let clean = crate::executor::strip_ansi_codes(raw);
+    let mut parsed = HttpParsedResponse::default();
+
+    // When following redirects (-L), split into response blocks separated by empty lines
+    let blocks: Vec<&str> = clean.split("\r\n\r\n")
+        .flat_map(|b| b.split("\n\n"))
+        .filter(|b| !b.trim().is_empty())
+        .collect();
+
+    // Use the final response block for headers, but collect cookies from all blocks
+    let target_block = blocks.last().copied().unwrap_or(&clean);
+
+    for block in &blocks {
+        for line in block.lines() {
+            let line = line.trim();
+            if let Some((k, v)) = line.split_once(':') {
+                if k.trim().eq_ignore_ascii_case("set-cookie") {
+                    parsed.cookies.push(v.trim().to_string());
+                }
+            }
+        }
+    }
+
+    for line in target_block.lines() {
         let line = line.trim();
         if line.is_empty() {
             continue;
         }
+
+        // Check for HTTP status line: "HTTP/1.1 200 OK" or "HTTP/2 200"
+        if (line.starts_with("HTTP/1.") || line.starts_with("HTTP/2") || line.starts_with("HTTP/3")) && line.contains(' ') {
+            let tokens: Vec<&str> = line.split_whitespace().collect();
+            if tokens.len() >= 2 {
+                parsed.http_version = Some(tokens[0].to_string());
+                if let Ok(code) = tokens[1].parse::<u16>() {
+                    parsed.status_code = Some(code);
+                }
+                if tokens.len() >= 3 {
+                    parsed.status_text = Some(tokens[2..].join(" "));
+                }
+            }
+            continue;
+        }
+
         if let Some((key, val)) = line.split_once(':') {
             let k = key.trim().to_lowercase();
             let v = val.trim().to_string();
-            headers.entry(k)
+            parsed.headers.entry(k)
                 .and_modify(|existing: &mut String| {
                     existing.push_str(", ");
                     existing.push_str(&v);
@@ -150,7 +201,8 @@ pub fn parse_headers(raw: &str) -> HashMap<String, String> {
                 .or_insert(v);
         }
     }
-    headers
+
+    parsed
 }
 
 #[async_trait]
@@ -179,12 +231,19 @@ impl Probe for CurlHeadersProbe {
         let random_ua = get_random_user_agent();
         let mut args = vec![
             "-s",
-            "-I",
-            "-X",
-            "OPTIONS",
+            "-i",
+            "-k", // Insecure SSL (bypass self-signed / inspection firewalls)
+            "--connect-timeout",
+            "6",
             "--max-time",
-            "10",
+            "15",
+            "--retry",
+            "2",
+            "--retry-delay",
+            "1",
             "--location",
+            "--max-redirs",
+            "5",
             "-A",
             random_ua,
         ];
@@ -197,9 +256,10 @@ impl Probe for CurlHeadersProbe {
         args.push(&url);
 
         let output = run_command("curl", &args, self.timeout_secs()).await?;
-        let headers = parse_headers(&output.stdout);
+        let resp = parse_http_response(&output.stdout);
+        let headers = &resp.headers;
 
-        if headers.is_empty() {
+        if headers.is_empty() && resp.status_code.is_none() {
             warn!("[-] No HTTP response headers returned from curl for {}", url);
             return Ok(ProbeResult::skipped("curl-headers", "No response headers received"));
         }
@@ -208,14 +268,14 @@ impl Probe for CurlHeadersProbe {
         let mut detected_techs = Vec::new();
 
         // 1. Missing Security Headers
-        if !headers.contains_key("strict-transport-security") {
+        if !headers.contains_key("strict-transport-security") && url.starts_with("https://") {
             findings.push(
                 Finding::new(
                     "curl",
                     &url,
                     FindingKind::MisconfiguredHeader,
                     Severity::Medium,
-                    "Missing HSTS",
+                    "Missing HSTS (Strict-Transport-Security)",
                     "Strict-Transport-Security header is absent. Communication is susceptible to SSL stripping and downgrade attacks.",
                     serde_json::json!({
                         "header": "Strict-Transport-Security",
@@ -227,15 +287,15 @@ impl Probe for CurlHeadersProbe {
             );
         }
 
-        if !headers.contains_key("x-frame-options") {
+        if !headers.contains_key("x-frame-options") && !headers.get("content-security-policy").map(|c| c.contains("frame-ancestors")).unwrap_or(false) {
             findings.push(
                 Finding::new(
                     "curl",
                     &url,
                     FindingKind::MisconfiguredHeader,
                     Severity::Medium,
-                    "Missing Clickjacking Protection",
-                    "X-Frame-Options header is absent, making the web page vulnerable to clickjacking attacks via iframes.",
+                    "Missing Clickjacking Protection (X-Frame-Options)",
+                    "X-Frame-Options header and CSP frame-ancestors are absent, making the web page vulnerable to clickjacking attacks via iframes.",
                     serde_json::json!({
                         "header": "X-Frame-Options",
                         "status": "missing"
@@ -253,7 +313,7 @@ impl Probe for CurlHeadersProbe {
                     &url,
                     FindingKind::MisconfiguredHeader,
                     Severity::Low,
-                    "Missing MIME Sniffing Protection",
+                    "Missing MIME Sniffing Protection (X-Content-Type-Options)",
                     "X-Content-Type-Options: nosniff is absent. User-agents may incorrectly sniff content types, risking XSS.",
                     serde_json::json!({
                         "header": "X-Content-Type-Options",
@@ -284,7 +344,64 @@ impl Probe for CurlHeadersProbe {
             );
         }
 
-        // 2. Information Disclosure via Headers
+        // 2. Cookie Security Analysis
+        for cookie in &resp.cookies {
+            let cookie_lower = cookie.to_lowercase();
+            let mut issues = Vec::new();
+            if !cookie_lower.contains("secure") && url.starts_with("https://") {
+                issues.push("missing Secure flag");
+            }
+            if !cookie_lower.contains("httponly") {
+                issues.push("missing HttpOnly flag");
+            }
+            if !cookie_lower.contains("samesite") {
+                issues.push("missing SameSite attribute");
+            }
+
+            if !issues.is_empty() {
+                let cookie_name = cookie.split('=').next().unwrap_or("cookie").trim();
+                findings.push(
+                    Finding::new(
+                        "curl",
+                        &url,
+                        FindingKind::InsecureCookie,
+                        Severity::Low,
+                        format!("Insecure Cookie Flags: {}", cookie_name),
+                        format!("Cookie '{}' has security weaknesses: {}. Cookies without flags risk theft via XSS or cleartext transmission.", cookie_name, issues.join(", ")),
+                        serde_json::json!({
+                            "cookie": cookie,
+                            "issues": issues,
+                        }),
+                        0.90,
+                    )
+                    .with_tags(vec!["cookie".into(), "security".into()]),
+                );
+            }
+        }
+
+        // 3. CORS Misconfiguration Check
+        if let Some(cors) = headers.get("access-control-allow-origin") {
+            if cors == "*" {
+                findings.push(
+                    Finding::new(
+                        "curl",
+                        &url,
+                        FindingKind::CorsMisconfiguration,
+                        Severity::Medium,
+                        "Overly Permissive CORS (Access-Control-Allow-Origin: *)",
+                        "Access-Control-Allow-Origin is set to wildcard (*), allowing arbitrary third-party domains to read API responses.",
+                        serde_json::json!({
+                            "header": "Access-Control-Allow-Origin",
+                            "value": cors,
+                        }),
+                        0.90,
+                    )
+                    .with_tags(vec!["cors".into(), "api".into(), "security".into()]),
+                );
+            }
+        }
+
+        // 4. Information Disclosure via Headers
         if let Some(server) = headers.get("server") {
             detected_techs.push(server.clone());
             findings.push(
@@ -325,7 +442,7 @@ impl Probe for CurlHeadersProbe {
             );
         }
 
-        // 3. Dangerous HTTP Methods
+        // 5. Dangerous HTTP Methods
         if let Some(allow) = headers.get("allow") {
             let dangerous_methods: Vec<&str> = ["PUT", "DELETE", "TRACE", "CONNECT"]
                 .iter()
@@ -354,16 +471,23 @@ impl Probe for CurlHeadersProbe {
             }
         }
 
-        // 4. Header summary finding
+        // 6. Header summary finding
+        let status_num = resp.status_code.unwrap_or(200);
         findings.push(
             Finding::new(
                 "curl",
                 &url,
                 FindingKind::HttpHeader,
                 Severity::Info,
-                "HTTP Response Headers Summary",
-                format!("Successfully extracted {} HTTP response headers from {}", headers.len(), url),
-                serde_json::to_value(&headers).unwrap_or_else(|_| serde_json::json!({})),
+                format!("HTTP Response: {} ({:?})", status_num, resp.status_text.as_deref().unwrap_or("")),
+                format!("Extracted {} headers from {} (HTTP status {}). Protocol: {:?}", headers.len(), url, status_num, resp.http_version),
+                serde_json::json!({
+                    "status_code": resp.status_code,
+                    "http_version": resp.http_version,
+                    "status_text": resp.status_text,
+                    "headers": headers,
+                    "cookies": resp.cookies,
+                }),
                 1.0,
             )
             .with_tags(vec!["headers".into(), "summary".into()]),
@@ -634,8 +758,8 @@ impl Probe for FfufProbe {
         let temp_out_path = temp_out.into_temp_path();
         let out_path_string = temp_out_path.to_string_lossy().to_string();
 
-        let threads = if ctx.waf_detected {
-            info!("[!] WAF detected: switching FFuF to STEALTH mode (5 threads, randomized 0.5-2.0s delay, browser UA rotation)");
+        let threads = if ctx.stealth_mode || ctx.waf_detected {
+            info!("[!] Stealth/WAF mode active: switching FFuF to low-profile mode (5 threads, 0.5-2.0s delay jitter, browser UA rotation)");
             "5"
         } else {
             "50"
@@ -653,13 +777,14 @@ impl Probe for FfufProbe {
             ".php,.bak,.env,.git,.sql,.zip",
             "-mc",
             "200,204,301,302,307,401,403",
+            "-ac", // Auto-calibrate false positive filters
             "-t",
             threads,
             "-H",
             &ua_header,
         ];
 
-        if ctx.waf_detected {
+        if ctx.stealth_mode || ctx.waf_detected {
             args.push("-p");
             args.push("0.5-2.0");
         }
@@ -862,25 +987,27 @@ pub struct NiktoVulnerability {
 }
 
 pub fn parse_nikto_json(content: &str) -> Vec<NiktoVulnerability> {
-    if let Ok(report) = serde_json::from_str::<NiktoReport>(content) {
+    let clean = crate::executor::strip_ansi_codes(content);
+    let trimmed = clean.trim();
+    if let Ok(report) = serde_json::from_str::<NiktoReport>(trimmed) {
         if !report.vulnerabilities.is_empty() {
             return report.vulnerabilities;
         }
     }
-    if let Ok(reports) = serde_json::from_str::<Vec<NiktoReport>>(content) {
+    if let Ok(reports) = serde_json::from_str::<Vec<NiktoReport>>(trimmed) {
         let vulns: Vec<NiktoVulnerability> = reports.into_iter().flat_map(|r| r.vulnerabilities).collect();
         if !vulns.is_empty() {
             return vulns;
         }
     }
-    if let Ok(vulns) = serde_json::from_str::<Vec<NiktoVulnerability>>(content) {
+    if let Ok(vulns) = serde_json::from_str::<Vec<NiktoVulnerability>>(trimmed) {
         if !vulns.is_empty() {
             return vulns;
         }
     }
-    if let (Some(start), Some(end)) = (content.find('{'), content.rfind('}')) {
+    if let (Some(start), Some(end)) = (trimmed.find('{'), trimmed.rfind('}')) {
         if start < end {
-            let slice = &content[start..=end];
+            let slice = &trimmed[start..=end];
             if let Ok(report) = serde_json::from_str::<NiktoReport>(slice) {
                 if !report.vulnerabilities.is_empty() {
                     return report.vulnerabilities;
@@ -888,9 +1015,9 @@ pub fn parse_nikto_json(content: &str) -> Vec<NiktoVulnerability> {
             }
         }
     }
-    if let (Some(start), Some(end)) = (content.find('['), content.rfind(']')) {
+    if let (Some(start), Some(end)) = (trimmed.find('['), trimmed.rfind(']')) {
         if start < end {
-            let slice = &content[start..=end];
+            let slice = &trimmed[start..=end];
             if let Ok(reports) = serde_json::from_str::<Vec<NiktoReport>>(slice) {
                 let vulns: Vec<NiktoVulnerability> = reports.into_iter().flat_map(|r| r.vulnerabilities).collect();
                 if !vulns.is_empty() {
@@ -950,9 +1077,11 @@ impl Probe for NiktoProbe {
             args.push(prx.as_str());
         }
 
-        if ctx.waf_detected {
-            info!("[!] WAF detected: enabling Nikto evasion encoding (-evasion 1)");
+        if ctx.stealth_mode || ctx.waf_detected {
+            info!("[!] WAF/Stealth active: enabling Nikto evasion encoding (-evasion 1) and 1s pause");
             args.push("-evasion");
+            args.push("1");
+            args.push("-Pause");
             args.push("1");
         }
 

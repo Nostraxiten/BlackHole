@@ -92,6 +92,9 @@ sudo ./uninstall.sh --purge-deps --purge-rust
 # External Target Audit: Comprehensive domain assessment
 sudo ./blackhole scanme.nmap.org
 
+# External Audit with Stealth Firewall-Evasion Timing & Evasive Decoys
+sudo ./blackhole target.com --stealth --evade --top-ports 100
+
 # External Audit with Tor / SOCKS5 Proxy Routing & High Concurrency
 sudo ./blackhole target.com --proxy socks5://127.0.0.1:9050 -c 16
 

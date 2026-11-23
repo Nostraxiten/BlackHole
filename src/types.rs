@@ -52,6 +52,9 @@ pub enum FindingKind {
     MisconfiguredHeader,
     HostDiscovery,
     InformationDisclosure,
+    FirewallBehavior,
+    InsecureCookie,
+    CorsMisconfiguration,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +210,11 @@ pub struct AuditContext {
     pub output_dir: String,
     pub session_id: Uuid,
     pub start_time: DateTime<Utc>,
+    pub stealth_mode: bool,
+    pub evasion_mode: bool,
+    pub top_ports_limit: Option<usize>,
+    pub firewall_detected: bool,
+    pub timeout_events: Vec<String>,
 }
 
 impl AuditContext {
@@ -238,6 +246,11 @@ impl AuditContext {
             output_dir: output_dir.into(),
             session_id: Uuid::new_v4(),
             start_time: Utc::now(),
+            stealth_mode: false,
+            evasion_mode: false,
+            top_ports_limit: None,
+            firewall_detected: false,
+            timeout_events: Vec::new(),
         }
     }
 

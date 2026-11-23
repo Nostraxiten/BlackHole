@@ -17,6 +17,36 @@ impl CommandOutput {
     pub fn is_success(&self) -> bool {
         self.exit_code == 0
     }
+
+    pub fn clean_stdout(&self) -> String {
+        strip_ansi_codes(&self.stdout)
+    }
+
+    pub fn clean_stderr(&self) -> String {
+        strip_ansi_codes(&self.stderr)
+    }
+}
+
+/// Strips ANSI terminal escape codes from tool outputs so parsers never fail on color sequences.
+pub fn strip_ansi_codes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() || next == 'm' || next == 'K' || next == 'H' || next == 'J' {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Resolves a binary by prioritizing local repository directories before querying system PATH.

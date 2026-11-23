@@ -850,15 +850,27 @@ impl Probe for WafDetectProbe {
         let mut entries = Self::parse_wafw00f_json(&combined_output);
         if entries.is_empty() {
             let lower = combined_output.to_lowercase();
-            if lower.contains("is behind") {
+            if lower.contains("is behind") || lower.contains("detected") {
                 let name = if lower.contains("cloudflare") {
                     Some("Cloudflare".to_string())
                 } else if lower.contains("akamai") {
                     Some("Akamai".to_string())
                 } else if lower.contains("aws") || lower.contains("cloudfront") {
                     Some("AWS CloudFront / WAF".to_string())
+                } else if lower.contains("imperva") || lower.contains("incapsula") {
+                    Some("Imperva Incapsula".to_string())
+                } else if lower.contains("f5") || lower.contains("asm") || lower.contains("big-ip") {
+                    Some("F5 BIG-IP ASM".to_string())
+                } else if lower.contains("forti") || lower.contains("fortiweb") {
+                    Some("Fortinet FortiWeb".to_string())
+                } else if lower.contains("sucuri") {
+                    Some("Sucuri CloudProxy".to_string())
+                } else if lower.contains("barracuda") {
+                    Some("Barracuda WAF".to_string())
+                } else if lower.contains("modsecurity") || lower.contains("owasp") {
+                    Some("ModSecurity / OWASP CRS".to_string())
                 } else {
-                    Some("Generic WAF".to_string())
+                    Some("Generic WAF / Reverse Proxy".to_string())
                 };
                 entries.push(WafEntry {
                     url: target_url.clone(),

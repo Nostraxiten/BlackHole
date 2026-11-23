@@ -62,7 +62,8 @@ impl Probe for SubfinderProbe {
         let mut discovered: Vec<String> = Vec::new();
         let mut findings = Vec::new();
 
-        for line in cmd_out.stdout.lines() {
+        let clean_stdout = crate::executor::strip_ansi_codes(&cmd_out.stdout);
+        for line in clean_stdout.lines() {
             let line = line.trim();
             if line.is_empty() {
                 continue;
