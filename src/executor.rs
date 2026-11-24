@@ -18,10 +18,12 @@ impl CommandOutput {
         self.exit_code == 0
     }
 
+    #[allow(dead_code)]
     pub fn clean_stdout(&self) -> String {
         strip_ansi_codes(&self.stdout)
     }
 
+    #[allow(dead_code)]
     pub fn clean_stderr(&self) -> String {
         strip_ansi_codes(&self.stderr)
     }

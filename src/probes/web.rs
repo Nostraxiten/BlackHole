@@ -141,6 +141,7 @@ pub struct HttpParsedResponse {
     pub cookies: Vec<String>,
 }
 
+#[allow(dead_code)]
 pub fn parse_headers(raw: &str) -> HashMap<String, String> {
     parse_http_response(raw).headers
 }
